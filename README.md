@@ -5,7 +5,7 @@ cli is a simple, fast package for building command line apps in Go. It's a wrapp
 Declare a struct type that embeds *cli.Flagger, along with an fields you want to capture as flags.
 ```
 type Echo struct {
-	*cli.Flagger
+    *cli.Flagger
     Echoed string `flag:"echoed, echo this string"`
 }
 ```
