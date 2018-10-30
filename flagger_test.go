@@ -10,7 +10,7 @@ import (
 
 type FlaggerTestSuite struct {
 	suite.Suite
-	cli *Cli
+	cli *CLI
 }
 
 type TestCommand struct {
@@ -21,14 +21,14 @@ func (c *TestCommand) Desc() string {
 	return "Test description"
 }
 func (c *TestCommand) Run() {
-	fmt.Println("na ez lefutott")
+	fmt.Println("its okey")
 }
 func (c *TestCommand) Samples() []string {
 	return []string{"test samle"}
 }
 
 func (suite *FlaggerTestSuite) SetupTest() {
-	suite.cli = NewCli("test", "1.0.0")
+	suite.cli = New("test", "1.0.0")
 }
 
 func TestSafeList(t *testing.T) {
@@ -43,7 +43,7 @@ func (suite *FlaggerTestSuite) TestEmptyFlag() {
 func (suite *FlaggerTestSuite) TestWrongFlag() {
 	type testcommand2 struct {
 		TestCommand
-		Alma *interface{} `flag:"alma"`
+		Apple *interface{} `flag:"apple"`
 	}
 	suite.cli.Add(&testcommand2{})
 	suite.NotNil(suite.cli.defineFlagSet(suite.cli.commandSets["testcommand2"]))
@@ -52,7 +52,7 @@ func (suite *FlaggerTestSuite) TestWrongFlag() {
 func (suite *FlaggerTestSuite) TestUnexportedFlag() {
 	type testcommand2 struct {
 		TestCommand
-		alma *interface{} `flag:"alma"`
+		Apple *interface{} `flag:"apple"`
 	}
 	suite.cli.Add(&testcommand2{})
 	suite.NotNil(suite.cli.defineFlagSet(suite.cli.commandSets["testcommand2"]))

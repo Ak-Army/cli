@@ -1,11 +1,11 @@
 package cli
 
 import (
-	"bufio"
 	"bytes"
 	"flag"
 )
 
+// Command is an interface for cli commands
 type Command interface {
 	Desc() string
 	Samples() []string
@@ -15,6 +15,7 @@ type Command interface {
 	Help() string
 }
 
+// Flagger is a helper struct for commands
 type Flagger struct {
 	*flag.FlagSet
 	Output bytes.Buffer
@@ -22,16 +23,13 @@ type Flagger struct {
 
 func (f *Flagger) GetFlagSet() *flag.FlagSet {
 	f.FlagSet.Usage = func() {}
-	f.FlagSet.SetOutput(bufio.NewWriter(&f.Output))
+	f.FlagSet.SetOutput(&f.Output)
 	return f.FlagSet
 }
 
 func (f *Flagger) Help() string {
-	b := &bytes.Buffer{}
-	f.FlagSet.SetOutput(b)
 	f.PrintDefaults()
-	f.FlagSet.SetOutput(bufio.NewWriter(&f.Output))
-	return b.String()
+	return f.Output.String()
 }
 
 func (f *Flagger) Samples() []string {

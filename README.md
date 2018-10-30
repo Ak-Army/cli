@@ -47,18 +47,17 @@ func (c *Echo) Samples() []string {
 ```
 We can set default command to run
 ```Go
-c.SetDefaults("echo")
+c.SetDefault("echo")
 ```
 After all of this, we can run them like this:
 ```Go
 func main() {
-	c := cli.NewCli("echoer", "1.0.0")
+	c := cli.New("echoer", "1.0.0")
 	c.Authors = []string{"authors goes here"}
 	c.Add(
 		&Echo{
 			Echoed: "default string",
 		})
-	//c.SetDefaults("echo")
 	c.Run(os.Args)
 }
 
