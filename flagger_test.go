@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -16,12 +17,13 @@ type FlaggerTestSuite struct {
 
 type TestCommand struct {
 	*Flagger
+	Verbose bool `flag:"v"`
 }
 
 func (c *TestCommand) Desc() string {
 	return "Test description"
 }
-func (c *TestCommand) Run() {
+func (c *TestCommand) Run(ctx context.Context) {
 	fmt.Println("its okey")
 }
 func (c *TestCommand) Samples() []string {
@@ -38,25 +40,25 @@ func TestSafeList(t *testing.T) {
 
 func (suite *FlaggerTestSuite) TestEmptyFlag() {
 	suite.cli.Add(&TestCommand{})
-	suite.Nil(suite.cli.defineFlagSet(suite.cli.commandSets["testcommand"]))
+	suite.Nil(suite.cli.getFlagSet(suite.cli.commandSets["testcommand"]))
 }
 
 func (suite *FlaggerTestSuite) TestWrongFlag() {
 	type testcommand2 struct {
-		TestCommand
+		*TestCommand
 		Apple *interface{} `flag:"apple"`
 	}
 	suite.cli.Add(&testcommand2{})
-	suite.NotNil(suite.cli.defineFlagSet(suite.cli.commandSets["testcommand2"]))
+	suite.NotNil(suite.cli.getFlagSet(suite.cli.commandSets["testcommand2"]))
 }
 
 func (suite *FlaggerTestSuite) TestUnexportedFlag() {
 	type testcommand2 struct {
-		TestCommand
+		*TestCommand
 		Apple *interface{} `flag:"apple"`
 	}
 	suite.cli.Add(&testcommand2{})
-	suite.NotNil(suite.cli.defineFlagSet(suite.cli.commandSets["testcommand2"]))
+	suite.NotNil(suite.cli.getFlagSet(suite.cli.commandSets["testcommand2"]))
 }
 
 type CustomFlag []string
@@ -84,6 +86,9 @@ func (suite *FlaggerTestSuite) TestFlag() {
 		NonExposed int  // does not have flag attached
 	}
 	reference := testcommand2{
+		TestCommand: TestCommand{
+			Verbose: true,
+		},
 		String:   "whales",
 		Int:      42,
 		Int64:    100 << 30,
@@ -96,7 +101,7 @@ func (suite *FlaggerTestSuite) TestFlag() {
 	}
 	conf := testcommand2{}
 	suite.cli.Add(&conf)
-	suite.Nil(suite.cli.defineFlagSet(&conf))
+	suite.Nil(suite.cli.getFlagSet(&conf))
 
 	args := []string{
 		"-string", "whales", "-int", "42",
@@ -105,6 +110,7 @@ func (suite *FlaggerTestSuite) TestFlag() {
 		"-duration", "15m",
 		"-slice", "a",
 		"-slice", "b",
+		"-v",
 	}
 	suite.Nil(conf.Parse(args))
 	conf.Flagger = nil
@@ -142,7 +148,7 @@ func (suite *FlaggerTestSuite) TestDefaultValueFlag() {
 		String: "whales",
 	}
 	suite.cli.Add(&conf)
-	suite.Nil(suite.cli.defineFlagSet(&conf))
+	suite.Nil(suite.cli.getFlagSet(&conf))
 
 	args := []string{
 		"-int", "42",
@@ -165,7 +171,7 @@ func (suite *FlaggerTestSuite) TestParseError() {
 
 	conf := testcommand2{}
 	suite.cli.Add(&conf)
-	suite.Nil(suite.cli.defineFlagSet(&conf))
+	suite.Nil(suite.cli.getFlagSet(&conf))
 
 	args := []string{
 		"-int", "fasdf",
@@ -189,7 +195,7 @@ func (suite *FlaggerTestSuite) TestParseErrorCustom() {
 
 	conf := testcommand2{}
 	suite.cli.Add(&conf)
-	suite.Nil(suite.cli.defineFlagSet(&conf))
+	suite.Nil(suite.cli.getFlagSet(&conf))
 
 	args := []string{
 		"-int", "fasdf",

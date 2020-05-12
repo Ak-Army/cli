@@ -162,7 +162,7 @@ func (cli *CLI) Run(ctx context.Context, args []string) {
 	}
 	for name, c := range cli.commandSets {
 		if name == command {
-			cli.defineFlagSet(c)
+			cli.getFlagSet(c)
 			var err error
 			if len(args) > 1 {
 				err = c.Parse(args[2:])
@@ -191,19 +191,23 @@ func (cli *CLI) help(commandName string) {
 		}
 	} else {
 		for _, command := range cli.commandSets {
-			cli.defineFlagSet(command)
+			cli.getFlagSet(command)
 		}
 		cli.Commands = cli.commandSets
 		cli.template.Execute(os.Stderr, cli)
 	}
 }
 
-func (cli *CLI) defineFlagSet(command Command) error {
+func (cli *CLI) getFlagSet(command Command) error {
 	fs := command.GetFlagSet()
 	st := reflect.ValueOf(command)
 	if st.Kind() != reflect.Ptr {
 		return errors.New("pointer expected")
 	}
+	return cli.defineFlagSet(fs, st)
+}
+
+func (cli *CLI) defineFlagSet(fs *flag.FlagSet, st reflect.Value) error {
 	st = reflect.Indirect(st)
 	if !st.IsValid() || st.Type().Kind() != reflect.Struct {
 		return errors.New("non-nil pointer to struct expected")
@@ -213,6 +217,12 @@ func (cli *CLI) defineFlagSet(command Command) error {
 		typ := st.Type().Field(i)
 		var name, usage string
 		tag := typ.Tag.Get("flag")
+		if typ.Type.Kind() == reflect.Struct {
+			if err := cli.defineFlagSet(fs, st.Field(i)); err != nil {
+				return err
+			}
+			continue
+		}
 		if tag == "" {
 			continue
 		}
