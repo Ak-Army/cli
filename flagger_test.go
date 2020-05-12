@@ -3,9 +3,10 @@ package cli
 import (
 	"errors"
 	"fmt"
-	"github.com/stretchr/testify/suite"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/suite"
 )
 
 type FlaggerTestSuite struct {
@@ -177,7 +178,7 @@ type CustomFlagError []string
 func (c *CustomFlagError) String() string { return fmt.Sprint(*c) }
 func (c *CustomFlagError) Set(value string) error {
 	*c = append(*c, value)
-	return errors.New("Its a trap")
+	return errors.New("its a trap")
 }
 
 func (suite *FlaggerTestSuite) TestParseErrorCustom() {

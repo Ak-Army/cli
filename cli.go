@@ -68,6 +68,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -154,7 +155,7 @@ func (cli *CLI) SetDefault(command string) {
 }
 
 // Run parses the arguments and runs the applicable command
-func (cli *CLI) Run(args []string) {
+func (cli *CLI) Run(ctx context.Context, args []string) {
 	command := cli.defaultCommand
 	if len(args) > 1 {
 		command = args[1]
@@ -175,7 +176,7 @@ func (cli *CLI) Run(args []string) {
 				cli.help(command)
 				return
 			}
-			c.Run()
+			c.Run(ctx)
 			return
 		}
 	}

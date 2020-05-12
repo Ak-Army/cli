@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"flag"
 )
 
@@ -9,7 +10,7 @@ import (
 type Command interface {
 	Desc() string
 	Samples() []string
-	Run()
+	Run(ctx context.Context)
 	Parse([]string) error
 	GetFlagSet() *flag.FlagSet
 	Help() string
