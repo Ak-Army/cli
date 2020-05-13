@@ -219,7 +219,7 @@ func (cli *CLI) getSubCommand(commandSet *commands, args []string) (*commands, e
 				return subC, nil
 			}
 			if len(args) > 1 {
-				if err := c.Command.Parse(args[2:]); err != nil {
+				if err := c.Command.Parse(args[1:]); err != nil {
 					return c, err
 				}
 			} else {
@@ -290,14 +290,14 @@ func (cli *CLI) defineFlagSet(fs *flag.FlagSet, st reflect.Value) error {
 	flagValueType := reflect.TypeOf((*flag.Value)(nil)).Elem()
 	for i := 0; i < st.NumField(); i++ {
 		typ := st.Type().Field(i)
-		var name, usage string
-		tag := typ.Tag.Get("flag")
 		if typ.Type.Kind() == reflect.Struct {
 			if err := cli.defineFlagSet(fs, st.Field(i)); err != nil {
 				return err
 			}
 			continue
 		}
+		var name, usage string
+		tag := typ.Tag.Get("flag")
 		if tag == "" {
 			continue
 		}
