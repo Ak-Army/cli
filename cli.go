@@ -205,15 +205,6 @@ func (cli *CLI) getSubCommand(commandSet *commands, args []string) (*commands, e
 	for name, c := range commandSet.SubCommands {
 		if name == args[0] {
 			cli.getFlagSet(c)
-			if len(args) > 1 {
-				if err := c.Command.Parse(args[2:]); err != nil {
-					return c, err
-				}
-			} else {
-				if err := c.Command.Parse([]string{}); err != nil {
-					return c, err
-				}
-			}
 			if len(c.SubCommands) > 0 {
 				if len(args) <= 1 {
 					return c, errors.New("missing sub command")
@@ -226,6 +217,15 @@ func (cli *CLI) getSubCommand(commandSet *commands, args []string) (*commands, e
 					return c, errors.New("missing sub command")
 				}
 				return subC, nil
+			}
+			if len(args) > 1 {
+				if err := c.Command.Parse(args[2:]); err != nil {
+					return c, err
+				}
+			} else {
+				if err := c.Command.Parse([]string{}); err != nil {
+					return c, err
+				}
 			}
 			return c, nil
 		}
