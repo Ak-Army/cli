@@ -12,27 +12,32 @@ type Command interface {
 	Samples() []string
 	Run(ctx context.Context)
 	Parse([]string) error
-	GetFlagSet() *flag.FlagSet
 	Help() string
+	SubCommands() []Command
+	getFlagSet() *flag.FlagSet
 }
 
 // Flagger is a helper struct for commands
 type Flagger struct {
 	*flag.FlagSet
-	Output bytes.Buffer
+	out bytes.Buffer
 }
 
-func (f *Flagger) GetFlagSet() *flag.FlagSet {
+func (f *Flagger) getFlagSet() *flag.FlagSet {
 	f.FlagSet.Usage = func() {}
-	f.FlagSet.SetOutput(&f.Output)
+	f.FlagSet.SetOutput(&f.out)
 	return f.FlagSet
 }
 
 func (f *Flagger) Help() string {
 	f.PrintDefaults()
-	return f.Output.String()
+	return f.out.String()
 }
 
 func (f *Flagger) Samples() []string {
 	return []string{}
+}
+
+func (f *Flagger) SubCommands() []Command {
+	return nil
 }

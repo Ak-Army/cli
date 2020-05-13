@@ -81,24 +81,34 @@ import (
 
 // CLI defines a new command line interface
 type CLI struct {
-	Name           string
-	Version        string
-	Description    string
-	Authors        []string
-	Commands       map[string]Command
-	commandSets    map[string]Command
-	defaultCommand string
-	template       *template.Template
+	Name            string
+	Version         string
+	Description     string
+	Authors         []string
+	Commands        *commands
+	commandSets     map[string]*commands
+	defaultCommand  string
+	template        *template.Template
+	commandTemplate *template.Template
+}
+
+type commands struct {
+	Command
+	SubCommands map[string]*commands
+	flagSetDone bool
 }
 
 // New returns new CLI struct
 func New(name string, version string) *CLI {
 	cli := &CLI{
 		Name:           name,
-		Commands:       make(map[string]Command),
-		commandSets:    make(map[string]Command),
+		commandSets:    make(map[string]*commands),
 		defaultCommand: "help",
 		Version:        version,
+	}
+	cli.commandSets["root"] = &commands{
+		SubCommands: make(map[string]*commands),
+		flagSetDone: true,
 	}
 	cli.SetTemplate(`USAGE:
    {{.Name}}{{if .Commands}} command [command options]{{end}}
@@ -108,45 +118,61 @@ DESCRIPTION:
    {{.Description}}{{end}}{{if len .Authors}}
 AUTHOR{{with $length := len .Authors}}{{if ne 1 $length}}S{{end}}{{end}}:
    {{range $index, $author := .Authors}}{{if $index}}
-   {{end}}{{$author}}{{end}}{{end}}{{if .Commands}}
-COMMAND{{with $length := len .Commands}}{{if ne 1 $length}}S{{end}}{{end}}:{{range $name, $command := .Commands}}
-   {{$name}}: {{$command.Desc}}
-      Options:
-        {{replace $command.Help "\n"  "\n        " -1}}{{if $command.Samples}}
-      Samples:
-          {{join $command.Samples "\n          "}}{{end}}
+   {{end}}{{$author}}{{end}}{{end}}{{if .Commands.Command}}
+COMMAND:
+   {{.Name}}: {{printCommand .Commands}}
+{{with $subCommands := .Commands.SubCommands}}{{with $subCommandsLength := len $subCommands}}{{if gt $subCommandsLength 0}}SUB COMMANDS DESCRIPTION{{if gt $subCommandsLength 1}}S{{end}}:{{range $subName, $subCommand := $subCommands}}
+   {{$subName}}: {{printCommand $subCommand}}
+{{end}}{{end}}{{end}}{{end}}{{else}}
+COMMAND{{with $length := len .Commands.SubCommands}}{{if ne 1 $length}}S{{end}}{{end}}:{{range $subName, $subCommands := .Commands.SubCommands}}
+    {{$subName}}: {{printCommand $subCommands}}
 {{end}}{{end}}
-`)
+`, `{{.Command.Desc}}{{with $help := .Command.Help}}{{if ne $help ""}}
+      Options:
+        {{replace $help "\n"  "\n        " -1}}{{end}}{{end}}{{with $samples := .Command.Samples}}{{with $sampleLen := len $samples}}{{if gt $sampleLen 1}}
+      Samples:
+          {{join $samples "\n          "}}{{end}}{{end}}{{end}}{{with $subCommands := .SubCommands}}{{with $subCommandsLength := len $subCommands}}{{if gt $subCommandsLength 0}}
+      SUB COMMAND{{if ne 1 $subCommandsLength}}S{{end}}:{{range $subName, $subCommand := $subCommands}}
+          {{$subName}}: {{$subCommand.Desc}}{{end}}{{end}}{{end}}{{end}}`)
 	return cli
 }
 
 // SetTemplate sets the template for the console output
-func (cli *CLI) SetTemplate(temp string) error {
-	t, err := template.New("help").Funcs(template.FuncMap{
+func (cli *CLI) SetTemplate(temp string, commandTemp string) error {
+	funcs := template.FuncMap{
 		"join":    strings.Join,
 		"replace": strings.Replace,
-	}).Parse(temp)
+		"printSubCommands": func(commands *commands) string {
+			err := cli.commandTemplate.Execute(os.Stderr, commands)
+			if err != nil {
+				return err.Error()
+			}
+			return ""
+		},
+		"printCommand": func(commands *commands) string {
+			err := cli.commandTemplate.Execute(os.Stderr, commands)
+			if err != nil {
+				return err.Error()
+			}
+			return ""
+		},
+	}
+	ct, err := template.New("command").Funcs(funcs).Parse(commandTemp)
+	if err != nil {
+		return err
+	}
+	t, err := template.New("help").Funcs(funcs).Parse(temp)
 	if err != nil {
 		return err
 	}
 	cli.template = t
+	cli.commandTemplate = ct
 	return nil
 }
 
-// Add add commands
+// Add commands
 func (cli *CLI) Add(commands ...Command) {
-	for _, c := range commands {
-		t := reflect.TypeOf(c).Elem()
-		v := reflect.ValueOf(c).Elem()
-		flagger := v.FieldByNameFunc(func(s string) bool { return strings.Contains(s, "Flagger") })
-		if !flagger.CanSet() {
-			continue
-		}
-		flagger.Set(reflect.ValueOf(&Flagger{FlagSet: &flag.FlagSet{}}))
-		name := strings.ToLower(t.Name())
-		cli.commandSets[name] = c
-
-	}
+	cli.addTo(commands, cli.commandSets["root"])
 }
 
 // SetDefault sets default command
@@ -156,55 +182,104 @@ func (cli *CLI) SetDefault(command string) {
 
 // Run parses the arguments and runs the applicable command
 func (cli *CLI) Run(ctx context.Context, args []string) {
-	command := cli.defaultCommand
-	if len(args) > 1 {
-		command = args[1]
+	if len(args) == 1 {
+		args = append(args, cli.defaultCommand)
 	}
-	for name, c := range cli.commandSets {
-		if name == command {
+	c, err := cli.getSubCommand(cli.commandSets["root"], args[1:])
+	if err != nil {
+		fmt.Println("INVALID PARAMETER:")
+		fmt.Println("  ", err)
+		fmt.Println()
+		cli.help(c)
+		return
+	}
+	if c == nil {
+		cli.help(cli.commandSets["root"])
+		return
+
+	}
+	c.Command.Run(ctx)
+}
+
+func (cli *CLI) getSubCommand(commandSet *commands, args []string) (*commands, error) {
+	for name, c := range commandSet.SubCommands {
+		if name == args[0] {
 			cli.getFlagSet(c)
-			var err error
 			if len(args) > 1 {
-				err = c.Parse(args[2:])
+				if err := c.Command.Parse(args[2:]); err != nil {
+					return c, err
+				}
 			} else {
-				err = c.Parse([]string{})
+				if err := c.Command.Parse([]string{}); err != nil {
+					return c, err
+				}
 			}
-			if err != nil {
-				fmt.Println("INVALID PARAMETER:")
-				fmt.Println("  ", err)
-				fmt.Println()
-				cli.help(command)
-				return
+			if len(c.SubCommands) > 0 {
+				if len(args) <= 1 {
+					return c, errors.New("missing sub command")
+				}
+				subC, err := cli.getSubCommand(c, args[1:])
+				if err != nil {
+					return c, err
+				}
+				if subC == nil {
+					return c, errors.New("missing sub command")
+				}
+				return subC, nil
 			}
-			c.Run(ctx)
-			return
+			return c, nil
 		}
 	}
-	cli.help("")
+	return nil, nil
 }
 
-func (cli *CLI) help(commandName string) {
-	if commandName != "" {
-		if command, ok := cli.commandSets[commandName]; ok {
-			cli.Commands[commandName] = command
-			cli.template.Execute(os.Stderr, cli)
+func (cli *CLI) addTo(commandList []Command, commandSet *commands) {
+	for _, c := range commandList {
+		if reflect.TypeOf(c).Kind() != reflect.Ptr {
+			continue
 		}
-	} else {
-		for _, command := range cli.commandSets {
-			cli.getFlagSet(command)
+		t := reflect.TypeOf(c).Elem()
+		v := reflect.ValueOf(c).Elem()
+		flagger := v.FieldByNameFunc(func(s string) bool { return strings.Contains(s, "Flagger") })
+		if !flagger.CanSet() {
+			continue
 		}
-		cli.Commands = cli.commandSets
-		cli.template.Execute(os.Stderr, cli)
+		flagger.Set(reflect.ValueOf(&Flagger{FlagSet: &flag.FlagSet{}}))
+		name := strings.ToLower(t.Name())
+
+		commandSet.SubCommands[name] = &commands{
+			Command:     c,
+			SubCommands: make(map[string]*commands),
+		}
+		if subCommands := c.SubCommands(); len(subCommands) > 0 {
+			cli.addTo(subCommands, commandSet.SubCommands[name])
+		}
 	}
 }
 
-func (cli *CLI) getFlagSet(command Command) error {
-	fs := command.GetFlagSet()
-	st := reflect.ValueOf(command)
+func (cli *CLI) help(command *commands) {
+	cli.Commands = command
+	cli.getFlagSet(command)
+	for _, c := range command.SubCommands {
+		cli.getFlagSet(c)
+	}
+	cli.template.Execute(os.Stderr, cli)
+}
+
+func (cli *CLI) getFlagSet(c *commands) error {
+	if c.flagSetDone {
+		return nil
+	}
+	c.flagSetDone = true
+	fs := c.Command.getFlagSet()
+	st := reflect.ValueOf(c.Command)
 	if st.Kind() != reflect.Ptr {
 		return errors.New("pointer expected")
 	}
-	return cli.defineFlagSet(fs, st)
+	if err := cli.defineFlagSet(fs, st); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (cli *CLI) defineFlagSet(fs *flag.FlagSet, st reflect.Value) error {

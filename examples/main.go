@@ -20,6 +20,23 @@ func (c *Archive) Desc() string {
 	return "Run  archiver"
 }
 func (c *Archive) Run(ctx context.Context) {
+	panic("ez nem futhat le!")
+}
+func (c *Archive) SubCommands() []cli.Command {
+	return []cli.Command{
+		&ArchiveSubCommand{},
+	}
+}
+
+type ArchiveSubCommand struct {
+	*cli.Flagger
+	Full string `flag:"full, full download"`
+}
+
+func (c *ArchiveSubCommand) Desc() string {
+	return "Run  archiver subcommand"
+}
+func (c *ArchiveSubCommand) Run(ctx context.Context) {
 	fmt.Println("Archive na ez lefutott", c.Args(), c)
 }
 
