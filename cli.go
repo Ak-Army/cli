@@ -2,14 +2,16 @@
 //
 // Example usage
 //
-// Declare a struct type that embeds *cli.Flagger, along with an fields you want to capture as flags.
+// Declare a struct type which implement cli.Command interface.
 //
 //     type Echo struct {
-//         *cli.Flagger
 //         Echoed string `flag:"echoed, echo this string"`
 //     }
 //
-// Package understands all basic types supported by flag's package xxxVar functions: int, int64, uint, uint64, float64, bool, string, time.Duration. Types implementing flag.Value interface are also supported.
+// Package understands all basic types supported by flag's package xxxVar functions:
+// int, int64, uint, uint64, float64, bool, string, time.Duration.
+// Types implementing flag.Value interface are also supported.
+// (Useful package: https://github.com/sgreben/flagvar)
 //
 //     type CustomDate string
 //
@@ -27,26 +29,24 @@
 //     }
 //
 //     type EchoWithDate struct {
-//         *cli.Flagger
 //         Echoed string `flag:"echoed, echo this string"`
 //         EchoWithDate CustomDate `flag:"echoDate, echo this date too"`
 //     }
 //
-// Now we need to make our type implement the cli.Command interface. That requires three methods that aren't already provided by *cli.Flagger:
+// Now we need to make our type implement the cli.Command interface.
 //
-//     func (c *Echo) Desc() string {
+//     func (c *Echo) Help() string {
 //         return "Echo the input string."
 //     }
 //
-//     func (c *Echo) Run() {
-//         fmt.Println(c.Echoed)
+//     func (c *Echo) Synopsis() string {
+//         return "Short one liner about the command"
 //     }
 //
 // Maybe we write sample command runs:
 //
-//     func (c *Echo) Samples() []string {
-//         return []string{"echoprogram -echoed=\"echo this\"",
-//         "echoprogram -echoed=\"or echo this\""}
+//     func (c *Echo) Run(ctx_ context.Context) error {
+//         return nil
 //     }
 //
 // We can set default command to run
@@ -56,123 +56,80 @@
 // After all of this, we can run them like this:
 //
 //     func main() {
-//         c := cli.New("echoer", "1.0.0")
-//         c.Authors = []string{"authors goes here"}
-//         c.Add(
-//             &Echo{
-//                 Echoed: "default string",
-//             })
-//         //c.SetDefaults("echo")
-//         c.Run(os.Args)
+//         c := cli.New("archiver", "1.0.0")
+//         cli.RootCommand().Authors = []string{"authors goes here"}
+//         cli.RootCommand().Description = `Lorem Ipsum is simply dummy text of the printing and typesetting industry.
+// Lorem Ipsum has been the industry's standard dummy text ever since the 1500s`
+//
+//         cli.RootCommand().AddCommand("echo", &Echo{})
+//         c.Run(context.Background(), os.Args)
 //     }
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"text/template"
 	"time"
 )
 
+const (
+	completeLine        = "COMP_LINE"
+	completePoint       = "COMP_POINT"
+	defaultHelpTemplate = `{{.Help}}
+{{with $flags := flagSet .Command}}{{if ne $flags ""}}
+Options:
+{{$flags}}{{- end }}{{end}}{{if gt (len .SubCommands) 0}}
+Commands:
+{{- range $name, $value := .SubCommands }}
+    {{$value.NameAligned}}    {{$value.Synopsis}}{{with $flags := flagSet $value.Command}}{{if ne $flags ""}}
+        Options:
+        {{replace $flags "\n" "\n        " -1}}{{- end }}{{end}}
+{{- end }}{{end}}
+`
+)
+
 // CLI defines a new command line interface
 type CLI struct {
-	Name            string
-	Version         string
-	Description     string
-	Authors         []string
-	Commands        *commands
-	commandSets     map[string]*commands
-	defaultCommand  string
-	template        *template.Template
-	commandTemplate *template.Template
+	// HelpWriter is used to print help text and version when requested.
+	HelpWriter io.Writer
+	// ErrorWriter used to output errors when a command can not be run.
+	ErrorWriter io.Writer
+	// AutoComplete used to handle autocomplete request from bash or zsh.
+	AutoComplete     bool
+	root             *Root
+	defaultCommand   string
+	flagSet          Flagger
+	flagSetOut       bytes.Buffer
+	template         string
+	lastCommandsName []string
 }
 
-type commands struct {
-	Command
-	SubCommands map[string]*commands
-	flagSetDone bool
-}
-
-// New returns new CLI struct
+// New returns a new CLI struct
 func New(name string, version string) *CLI {
 	cli := &CLI{
-		Name:           name,
-		commandSets:    make(map[string]*commands),
-		defaultCommand: "help",
-		Version:        version,
+		root:         RootCommand(),
+		HelpWriter:   os.Stdout,
+		AutoComplete: true,
+		ErrorWriter:  os.Stderr,
+		flagSet: &flag.FlagSet{
+			Usage: func() {},
+		},
+		template: defaultHelpTemplate,
 	}
-	cli.commandSets["root"] = &commands{
-		SubCommands: make(map[string]*commands),
-		flagSetDone: true,
-	}
-	cli.SetTemplate(`USAGE:
-   {{.Name}}{{if .Commands}} command [command options]{{end}}
-VERSION:
-   {{.Version}}{{if .Description}}
-DESCRIPTION:
-   {{.Description}}{{end}}{{if len .Authors}}
-AUTHOR{{with $length := len .Authors}}{{if ne 1 $length}}S{{end}}{{end}}:
-   {{range $index, $author := .Authors}}{{if $index}}
-   {{end}}{{$author}}{{end}}{{end}}{{if .Commands.Command}}
-COMMAND:
-   {{.Name}}: {{printCommand .Commands}}
-{{with $subCommands := .Commands.SubCommands}}{{with $subCommandsLength := len $subCommands}}{{if gt $subCommandsLength 0}}SUB COMMANDS DESCRIPTION{{if gt $subCommandsLength 1}}S{{end}}:{{range $subName, $subCommand := $subCommands}}
-   {{$subName}}: {{printCommand $subCommand}}
-{{end}}{{end}}{{end}}{{end}}{{else}}
-COMMAND{{with $length := len .Commands.SubCommands}}{{if ne 1 $length}}S{{end}}{{end}}:{{range $subName, $subCommands := .Commands.SubCommands}}
-    {{$subName}}: {{printCommand $subCommands}}
-{{end}}{{end}}
-`, `{{.Command.Desc}}{{with $help := .Command.Help}}{{if ne $help ""}}
-      Options:
-        {{replace $help "\n"  "\n        " -1}}{{end}}{{end}}{{with $samples := .Command.Samples}}{{with $sampleLen := len $samples}}{{if gt $sampleLen 1}}
-      Samples:
-          {{join $samples "\n          "}}{{end}}{{end}}{{end}}{{with $subCommands := .SubCommands}}{{with $subCommandsLength := len $subCommands}}{{if gt $subCommandsLength 0}}
-      SUB COMMAND{{if ne 1 $subCommandsLength}}S{{end}}:{{range $subName, $subCommand := $subCommands}}
-          {{$subName}}: {{$subCommand.Desc}}{{end}}{{end}}{{end}}{{end}}`)
+	cli.flagSet.SetOutput(&cli.flagSetOut)
+	cli.root.Name = name
+	cli.root.Version = version
+
 	return cli
-}
-
-// SetTemplate sets the template for the console output
-func (cli *CLI) SetTemplate(temp string, commandTemp string) error {
-	funcs := template.FuncMap{
-		"join":    strings.Join,
-		"replace": strings.Replace,
-		"printSubCommands": func(commands *commands) string {
-			err := cli.commandTemplate.Execute(os.Stderr, commands)
-			if err != nil {
-				return err.Error()
-			}
-			return ""
-		},
-		"printCommand": func(commands *commands) string {
-			err := cli.commandTemplate.Execute(os.Stderr, commands)
-			if err != nil {
-				return err.Error()
-			}
-			return ""
-		},
-	}
-	ct, err := template.New("command").Funcs(funcs).Parse(commandTemp)
-	if err != nil {
-		return err
-	}
-	t, err := template.New("help").Funcs(funcs).Parse(temp)
-	if err != nil {
-		return err
-	}
-	cli.template = t
-	cli.commandTemplate = ct
-	return nil
-}
-
-// Add commands
-func (cli *CLI) Add(commands ...Command) {
-	cli.addTo(commands, cli.commandSets["root"])
 }
 
 // SetDefault sets default command
@@ -182,50 +139,93 @@ func (cli *CLI) SetDefault(command string) {
 
 // Run parses the arguments and runs the applicable command
 func (cli *CLI) Run(ctx context.Context, args []string) {
+	doComplete := false
+	if line, ok := cli.isCompleteStarted(); ok {
+		if !cli.AutoComplete {
+			return
+		}
+		args = strings.Split(line, " ")
+		doComplete = true
+	}
 	if len(args) == 1 {
 		args = append(args, cli.defaultCommand)
 	}
-	c, err := cli.getSubCommand(cli.commandSets["root"], args[1:])
+	c, err := cli.getSubCommand(cli.root, args[1:])
+	if doComplete {
+		lastArg := strings.TrimLeft(args[len(args)-1], "-")
+		if len(cli.lastCommandsName) > 0 {
+			for _, name := range cli.lastCommandsName {
+				if strings.HasPrefix(name, lastArg) {
+					cli.HelpWriter.Write([]byte(name + "\n"))
+				}
+			}
+		} else {
+			cli.flagSet.VisitAll(func(f *flag.Flag) {
+				if strings.HasPrefix(f.Name, lastArg) {
+					cli.HelpWriter.Write([]byte("-" + f.Name + "\n"))
+				}
+			})
+		}
+		return
+	}
 	if err != nil {
-		fmt.Println("INVALID PARAMETER:")
-		fmt.Println("  ", err)
-		fmt.Println()
-		cli.help(c)
+		cli.help(c, err)
 		return
 	}
 	if c == nil {
-		cli.help(cli.commandSets["root"])
+		cli.help(cli.root, nil)
 		return
 
 	}
-	c.Command.Run(ctx)
+	if err := c.Run(ctx); err != nil {
+		cli.help(c, err)
+	}
 }
 
-func (cli *CLI) getSubCommand(commandSet *commands, args []string) (*commands, error) {
-	for name, c := range commandSet.SubCommands {
+// SetTemplate set a new template for commands
+func (cli *CLI) SetTemplate(template string) {
+	cli.template = template
+}
+
+// SetFlagSet set an different flag parser
+func (cli *CLI) SetFlagSet(flagSet Flagger) {
+	cli.flagSet = flagSet
+	cli.flagSet.SetOutput(&cli.flagSetOut)
+}
+
+func (cli *CLI) getSubCommand(command SubCommands, args []string) (Command, error) {
+	cli.lastCommandsName = []string{}
+	for name, c := range command.SubCommands() {
+		cli.lastCommandsName = append(cli.lastCommandsName, name)
 		if name == args[0] {
-			cli.getFlagSet(c)
-			if len(c.SubCommands) > 0 {
+			if err := cli.getFlagSet(c); err != nil {
+				return c, err
+			}
+			if subC, ok := c.(SubCommands); ok {
 				if len(args) <= 1 {
 					return c, errors.New("missing sub command")
 				}
-				subC, err := cli.getSubCommand(c, args[1:])
+				subC, err := cli.getSubCommand(subC, args[1:])
+				if subC != nil {
+					cli.lastCommandsName = []string{}
+				}
 				if err != nil {
-					return c, err
+					if subC == nil {
+						subC = c
+					}
+					return subC, err
 				}
 				if subC == nil {
-					return c, errors.New("missing sub command")
+					return c, errors.New("wrong sub command")
 				}
 				return subC, nil
 			}
+			var parseArg []string
 			if len(args) > 1 {
-				if err := c.Command.Parse(args[1:]); err != nil {
-					return c, err
-				}
-			} else {
-				if err := c.Command.Parse([]string{}); err != nil {
-					return c, err
-				}
+				parseArg = args[1:]
+			}
+			if err := cli.flagSet.Parse(parseArg); err != nil {
+				return c, err
 			}
 			return c, nil
 		}
@@ -233,72 +233,91 @@ func (cli *CLI) getSubCommand(commandSet *commands, args []string) (*commands, e
 	return nil, nil
 }
 
-func (cli *CLI) addTo(commandList []Command, commandSet *commands) {
-	for _, c := range commandList {
-		if reflect.TypeOf(c).Kind() != reflect.Ptr {
-			continue
+func (cli *CLI) help(c Command, err error) {
+	output := cli.HelpWriter
+	if err != nil {
+		output = cli.ErrorWriter
+		output.Write([]byte(err.Error() + "\n\n"))
+	}
+	t, err := template.New("root").Funcs(template.FuncMap{
+		"replace": strings.Replace,
+		"flagSet": func(c Command) string {
+			fs := &flag.FlagSet{
+				Usage: func() {},
+			}
+			var out bytes.Buffer
+			fs.SetOutput(&out)
+			st := reflect.ValueOf(c)
+			if st.Kind() != reflect.Ptr {
+				return err.Error()
+			}
+			if err := cli.defineFlagSet(fs, st, ""); err != nil {
+				return err.Error()
+			}
+			fs.PrintDefaults()
+			return out.String()
+		}}).Parse(defaultHelpTemplate)
+	if err != nil {
+		cli.ErrorWriter.Write([]byte(fmt.Sprintf(
+			"Internal error! Failed to parse command help template: %s\n", err)))
+		return
+	}
+	s := struct {
+		Command
+		SubCommands map[string]interface{}
+	}{
+		Command:     c,
+		SubCommands: make(map[string]interface{}),
+	}
+	if subCs, ok := c.(SubCommands); ok {
+		longest := 0
+		subC := subCs.SubCommands()
+		for k, _ := range subC {
+			if v := len(k); v > longest {
+				longest = v
+			}
 		}
-		t := reflect.TypeOf(c).Elem()
-		v := reflect.ValueOf(c).Elem()
-		flagger := v.FieldByNameFunc(func(s string) bool { return strings.Contains(s, "Flagger") })
-		if !flagger.CanSet() {
-			continue
-		}
-		flagger.Set(reflect.ValueOf(&Flagger{FlagSet: &flag.FlagSet{}}))
-		name := strings.ToLower(t.Name())
-
-		commandSet.SubCommands[name] = &commands{
-			Command:     c,
-			SubCommands: make(map[string]*commands),
-		}
-		if subCommands := c.SubCommands(); len(subCommands) > 0 {
-			cli.addTo(subCommands, commandSet.SubCommands[name])
+		for name, command := range subC {
+			c := command
+			s.SubCommands[name] = map[string]interface{}{
+				"Command":     c,
+				"Synopsis":    c.Synopsis(),
+				"Help":        c.Help(),
+				"NameAligned": name + strings.Repeat(" ", longest-len(name)),
+			}
 		}
 	}
+	t.Execute(output, s)
 }
 
-func (cli *CLI) help(command *commands) {
-	cli.Commands = command
-	cli.getFlagSet(command)
-	for _, c := range command.SubCommands {
-		cli.getFlagSet(c)
-	}
-	cli.template.Execute(os.Stderr, cli)
-}
-
-func (cli *CLI) getFlagSet(c *commands) error {
-	if c.flagSetDone {
-		return nil
-	}
-	c.flagSetDone = true
-	fs := c.Command.getFlagSet()
-	st := reflect.ValueOf(c.Command)
+func (cli *CLI) getFlagSet(c Command) error {
+	st := reflect.ValueOf(c)
 	if st.Kind() != reflect.Ptr {
 		return errors.New("pointer expected")
 	}
-	if err := cli.defineFlagSet(fs, st); err != nil {
+	if err := cli.defineFlagSet(cli.flagSet, st, ""); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (cli *CLI) defineFlagSet(fs *flag.FlagSet, st reflect.Value) error {
+func (cli *CLI) defineFlagSet(fs Flagger, st reflect.Value, subName string) error {
 	st = reflect.Indirect(st)
 	if !st.IsValid() || st.Type().Kind() != reflect.Struct {
-		return errors.New("non-nil pointer to struct expected")
+		return errors.New("non-nil pointer for struct expected")
 	}
 	flagValueType := reflect.TypeOf((*flag.Value)(nil)).Elem()
 	for i := 0; i < st.NumField(); i++ {
 		typ := st.Type().Field(i)
-		if typ.Type.Kind() == reflect.Struct {
-			if err := cli.defineFlagSet(fs, st.Field(i)); err != nil {
-				return err
-			}
-			continue
-		}
 		var name, usage string
 		tag := typ.Tag.Get("flag")
 		if tag == "" {
+			if typ.Type.Kind() == reflect.Struct {
+				if err := cli.defineFlagSet(fs, st.Field(i), ""); err != nil {
+					return err
+				}
+				continue
+			}
 			continue
 		}
 		val := st.Field(i)
@@ -306,7 +325,7 @@ func (cli *CLI) defineFlagSet(fs *flag.FlagSet, st reflect.Value) error {
 			return errors.New("field is unexported")
 		}
 		if !val.CanAddr() {
-			return errors.New("field is of unsupported type")
+			return errors.New("field is unsupported type")
 		}
 		flagData := strings.SplitN(tag, ",", 2)
 		switch len(flagData) {
@@ -315,9 +334,20 @@ func (cli *CLI) defineFlagSet(fs *flag.FlagSet, st reflect.Value) error {
 		case 2:
 			name, usage = flagData[0], flagData[1]
 		}
+		if name == "-" {
+			continue
+		}
+		if subName != "" {
+			name = subName + "." + name
+		}
 		addr := val.Addr()
 		if addr.Type().Implements(flagValueType) {
 			fs.Var(addr.Interface().(flag.Value), name, usage)
+			continue
+		} else if typ.Type.Kind() == reflect.Struct {
+			if err := cli.defineFlagSet(fs, st.Field(i), name); err != nil {
+				return err
+			}
 			continue
 		}
 		switch d := val.Interface().(type) {
@@ -342,4 +372,16 @@ func (cli *CLI) defineFlagSet(fs *flag.FlagSet, st reflect.Value) error {
 		}
 	}
 	return nil
+}
+
+func (cli *CLI) isCompleteStarted() (string, bool) {
+	line := os.Getenv(completeLine)
+	if line == "" {
+		return "", false
+	}
+	point, err := strconv.Atoi(os.Getenv(completePoint))
+	if err == nil && point > 0 && point < len(line) {
+		line = line[:point]
+	}
+	return line, true
 }
