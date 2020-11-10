@@ -2,10 +2,9 @@
 cli is a simple, fast package for building command line apps in Go. It's a wrapper around the "flag" package.
 
 # Example usage
-Declare a struct type that embeds *cli.Flagger, along with an fields you want to capture as flags.
+Declare a struct type along with an fields you want to capture as flags.
 ```Go
 type Echo struct {
-    *cli.Flagger
     Echoed string `flag:"echoed, echo this string"`
 }
 ```
@@ -24,14 +23,13 @@ func (c *CustomDate) Set(value string) error {
 	return nil
 }
 type EchoWithDate struct {
-    *cli.Flagger
     Echoed string `flag:"echoed, echo this string"`
     EchoWithDate CustomDate `flag:"echoDate, echo this date too"`
 }
 ```
-Now we need to make our type implement the cli.Command interface. That requires three methods that aren't already provided by *cli.Flagger:
+Now we need to make our type implement the cli.Command interfacem, which requires three methods:
 ```Go
-func (c *Echo) Desc() string {
+func (c *Echo) Synopsis() string {
 	return "Echo the input string."
 }
 func (c *Echo) Run() {
@@ -40,7 +38,7 @@ func (c *Echo) Run() {
 ```
 Maybe we write sample command runs:
 ```Go
-func (c *Echo) Samples() []string {
+func (c *Echo) Help() []string {
 	return []string{"echoprogram -echoed=\"echo this\"",
 	"echoprogram -echoed=\"or echo this\""}
 }
