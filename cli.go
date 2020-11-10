@@ -150,7 +150,7 @@ func (cli *CLI) Run(ctx context.Context, args []string) {
 	if len(args) == 1 {
 		args = append(args, cli.defaultCommand)
 	}
-	if strings.HasSuffix(args[1], "-") {
+	if strings.HasPrefix(args[1], "-") {
 		args = append([]string{args[0], cli.defaultCommand}, args[1:]...)
 	}
 	c, err := cli.getSubCommand(cli.root, args[1:])
