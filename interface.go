@@ -46,4 +46,5 @@ type Flagger interface {
 	SetOutput(output io.Writer)
 	Var(value flag.Value, name string, usage string)
 	VisitAll(fn func(*flag.Flag))
+	Args() []string
 }

@@ -230,6 +230,11 @@ func (cli *CLI) getSubCommand(command SubCommands, args []string) (Command, erro
 			if err := cli.flagSet.Parse(parseArg); err != nil {
 				return c, err
 			}
+			if p, ok := c.(ParseHelper); ok {
+				if err := p.Parse(cli.flagSet.Args()); err != nil {
+					return c, err
+				}
+			}
 			return c, nil
 		}
 	}
