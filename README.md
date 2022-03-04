@@ -2,7 +2,7 @@
 cli is a simple, fast package for building command line apps in Go. It's a wrapper around the "flag" package.
 
 # Example usage
-Declare a struct type along with an fields you want to capture as flags.
+Declare a struct type along with a fields you want to capture as flags.
 ```Go
 type Echo struct {
     Echoed string `flag:"echoed, echo this string"`
@@ -36,7 +36,7 @@ func (c *Echo) Run() {
 	fmt.Println(c.Echoed)
 }
 ```
-Maybe we write sample command runs:
+Maybe write sample command runs:
 ```Go
 func (c *Echo) Help() []string {
 	return []string{"echoprogram -echoed=\"echo this\"",
@@ -61,3 +61,5 @@ func main() {
 
 ```
 
+# Useful packages:
+* <https://github.com/sgreben/flagvar>
