@@ -1,8 +1,9 @@
 module github.com/Ak-Army/cli
 
-go 1.13
+go 1.23
 
-require (
-	github.com/gobwas/glob v0.2.3 // indirect
-	github.com/sgreben/flagvar v0.0.0-20200103140453-77ac8eec431f
-)
+toolchain go1.23.11
+
+require github.com/sgreben/flagvar v1.10.2
+
+require github.com/gobwas/glob v0.2.3 // indirect

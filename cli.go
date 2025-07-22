@@ -1,69 +1,70 @@
 // cli is a simple, fast package for building command line apps in Go. It's a wrapper around the "flag" package.
 //
-// Example usage
+// # Example usage
 //
 // Declare a struct type which implement cli.Command interface.
 //
-//     type Echo struct {
-//         Echoed string `flag:"echoed, echo this string"`
-//     }
+//	type Echo struct {
+//	    Echoed string `flag:"echoed, echo this string"`
+//	}
 //
 // Package understands all basic types supported by flag's package xxxVar functions:
 // int, int64, uint, uint64, float64, bool, string, time.Duration.
 // Types implementing flag.Value interface are also supported.
 // (Useful package: https://github.com/sgreben/flagvar)
 //
-//     type CustomDate string
+//	type CustomDate string
 //
-//     func (c *CustomDate) String() string {
-//         return fmt.Sprint(*c)
-//     }
+//	func (c *CustomDate) String() string {
+//	    return fmt.Sprint(*c)
+//	}
 //
-//     func (c *CustomDate) Set(value string) error {
-//         dateRegex := `^20\d{2}(\/|-)(0[1-9]|1[0-2])(\/|-)(0[1-9]|[12][0-9]|3[01])$`
-//         if ok, err := regexp.MatchString(dateRegex, value); err != nil || !ok {
-//             return errors.New("from parameter is not a valid date")
-//         }
-//         *c = CustomDate(value)
-//         return nil
-//     }
+//	func (c *CustomDate) Set(value string) error {
+//	    dateRegex := `^20\d{2}(\/|-)(0[1-9]|1[0-2])(\/|-)(0[1-9]|[12][0-9]|3[01])$`
+//	    if ok, err := regexp.MatchString(dateRegex, value); err != nil || !ok {
+//	        return errors.New("from parameter is not a valid date")
+//	    }
+//	    *c = CustomDate(value)
+//	    return nil
+//	}
 //
-//     type EchoWithDate struct {
-//         Echoed string `flag:"echoed, echo this string"`
-//         EchoWithDate CustomDate `flag:"echoDate, echo this date too"`
-//     }
+//	type EchoWithDate struct {
+//	    Echoed string `flag:"echoed, echo this string"`
+//	    EchoWithDate CustomDate `flag:"echoDate, echo this date too"`
+//	}
 //
 // Now we need to make our type implement the cli.Command interface.
 //
-//     func (c *Echo) Help() string {
-//         return "Echo the input string."
-//     }
+//	func (c *Echo) Help() string {
+//	    return "Echo the input string."
+//	}
 //
-//     func (c *Echo) Synopsis() string {
-//         return "Short one liner about the command"
-//     }
+//	func (c *Echo) Synopsis() string {
+//	    return "Short one liner about the command"
+//	}
 //
 // Maybe we write sample command runs:
 //
-//     func (c *Echo) Run(ctx_ context.Context) error {
-//         return nil
-//     }
+//	func (c *Echo) Run(ctx_ context.Context) error {
+//	    return nil
+//	}
 //
 // We can set default command to run
 //
-//     c.SetDefault("echo")
+//	c.SetDefault("echo")
 //
 // After all of this, we can run them like this:
 //
-//     func main() {
-//         c := cli.New("archiver", "1.0.0")
-//         cli.RootCommand().Authors = []string{"authors goes here"}
-//         cli.RootCommand().Description = `Lorem Ipsum is simply dummy text of the printing and typesetting industry.
+//	func main() {
+//	    c := cli.New("archiver", "1.0.0")
+//	    cli.RootCommand().Authors = []string{"authors goes here"}
+//	    cli.RootCommand().Description = `Lorem Ipsum is simply dummy text of the printing and typesetting industry.
+//
 // Lorem Ipsum has been the industry's standard dummy text ever since the 1500s`
 //
-//         cli.RootCommand().AddCommand("echo", &Echo{})
-//         c.Run(context.Background(), os.Args)
-//     }
+//	    cli.RootCommand().AddCommand("echo", &Echo{})
+//	    c.Run(context.Background(), os.Args)
+//	}
 package cli
 
 import (
@@ -256,7 +257,7 @@ func (cli *CLI) help(c Command, err error) {
 			var out bytes.Buffer
 			fs.SetOutput(&out)
 			st := reflect.ValueOf(c)
-			if st.Kind() != reflect.Ptr {
+			if st.Kind() != reflect.Pointer {
 				return err.Error()
 			}
 			if err := cli.defineFlagSet(fs, st, ""); err != nil {
@@ -264,7 +265,8 @@ func (cli *CLI) help(c Command, err error) {
 			}
 			fs.PrintDefaults()
 			return out.String()
-		}}).Parse(defaultHelpTemplate)
+		},
+	}).Parse(defaultHelpTemplate)
 	if err != nil {
 		cli.ErrorWriter.Write([]byte(fmt.Sprintf(
 			"Internal error! Failed to parse command help template: %s\n", err)))
@@ -280,7 +282,7 @@ func (cli *CLI) help(c Command, err error) {
 	if subCs, ok := c.(SubCommands); ok {
 		longest := 0
 		subC := subCs.SubCommands()
-		for k, _ := range subC {
+		for k := range subC {
 			if v := len(k); v > longest {
 				longest = v
 			}
@@ -300,7 +302,7 @@ func (cli *CLI) help(c Command, err error) {
 
 func (cli *CLI) getFlagSet(c Command) error {
 	st := reflect.ValueOf(c)
-	if st.Kind() != reflect.Ptr {
+	if st.Kind() != reflect.Pointer {
 		return errors.New("pointer expected")
 	}
 	if err := cli.defineFlagSet(cli.flagSet, st, ""); err != nil {
@@ -319,16 +321,22 @@ func (cli *CLI) defineFlagSet(fs Flagger, st reflect.Value, subName string) erro
 		typ := st.Type().Field(i)
 		var name, usage string
 		tag := typ.Tag.Get("flag")
+		val := st.Field(i)
 		if tag == "" {
-			if typ.Type.Kind() == reflect.Struct {
-				if err := cli.defineFlagSet(fs, st.Field(i), ""); err != nil {
+			switch typ.Type.Kind() {
+			case reflect.Struct:
+				if err := cli.defineFlagSet(fs, val, ""); err != nil {
 					return err
 				}
-				continue
+			case reflect.Pointer:
+				if reflect.ValueOf(val).Kind() == reflect.Struct {
+					if err := cli.defineFlagSet(fs, val, ""); err != nil {
+						return err
+					}
+				}
 			}
 			continue
 		}
-		val := st.Field(i)
 		if !val.CanInterface() {
 			return errors.New("field is unexported")
 		}
