@@ -322,6 +322,10 @@ func (cli *CLI) defineFlagSet(fs Flagger, st reflect.Value, subName string) erro
 		var name, usage string
 		tag := typ.Tag.Get("flag")
 		val := st.Field(i)
+		if !val.CanInterface() {
+			// field is unexported
+			continue
+		}
 		if tag == "" {
 			switch typ.Type.Kind() {
 			case reflect.Struct:
@@ -336,9 +340,6 @@ func (cli *CLI) defineFlagSet(fs Flagger, st reflect.Value, subName string) erro
 				}
 			}
 			continue
-		}
-		if !val.CanInterface() {
-			return errors.New("field is unexported")
 		}
 		if !val.CanAddr() {
 			return errors.New("field is unsupported type")
@@ -384,7 +385,7 @@ func (cli *CLI) defineFlagSet(fs Flagger, st reflect.Value, subName string) erro
 		case time.Duration:
 			fs.DurationVar(addr.Interface().(*time.Duration), name, d, usage)
 		default:
-			return errors.New(fmt.Sprintf("field with flag tag value %q is of unsupported type", name))
+			return errors.New(fmt.Sprintf("field with flag tag value %q is unsupported type", name))
 		}
 	}
 	return nil
