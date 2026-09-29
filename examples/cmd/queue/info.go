@@ -5,14 +5,13 @@ import (
 	"fmt"
 
 	"github.com/Ak-Army/cli/examples/cmd/base"
-
-	"github.com/sgreben/flagvar"
+	//"github.com/sgreben/flagvar"
 )
 
 type Info struct {
 	base.Base `flag:"base"`
-	Customer  flagvar.Strings `flag:"customer, print just the customer info"`
-	QueueId   int64           `flag:"queueId, print just one queue for a customer"`
+	//Customer  flagvar.Strings `flag:"customer, print just the customer info"`
+	QueueId int64 `flag:"queueId, print just one queue for a customer"`
 }
 
 func (d *Info) Help() string {

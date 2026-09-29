@@ -27,6 +27,17 @@ type EchoWithDate struct {
     EchoWithDate CustomDate `flag:"echoDate, echo this date too"`
 }
 ```
+Positional arguments are bound with the `arg` tag, in field order, after the flags. They support the same types
+as flags (and flag.Value). The last `arg` field may be a slice (`[]string`, or `[]T` where `*T` is a flag.Value):
+it takes the rest of the arguments. Missing or extra arguments are reported as errors, and the help lists them under
+"Arguments:". The `arg` fields of a parent command (one with sub commands) come first, followed by the ones of the
+sub command, all given after the sub command's name and flags; use `--` before an argument that starts with `-`.
+```Go
+type Supersede struct {
+    By  int64   `flag:"by, id of the observation that replaces them"`
+    Old []int64 `arg:"old-id, ids of the replaced observations"`
+}
+```
 Now we need to make our type implement the cli.Command interfacem, which requires three methods:
 ```Go
 func (c *Echo) Synopsis() string {
