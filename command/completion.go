@@ -74,6 +74,9 @@ func (c *Completion) Run(_ context.Context) error {
 }
 
 func (c *Completion) installBash() error {
+	if !c.Bash {
+		return nil
+	}
 	cmd := fmt.Sprintf(c.bashCmd, c.binPath, c.name)
 	file := filepath.Join(c.homeDir, ".bashrc")
 	if c.isLineExists(file, cmd) {
@@ -87,6 +90,9 @@ func (c *Completion) installBash() error {
 }
 
 func (c *Completion) installZsh() error {
+	if !c.Zsh {
+		return nil
+	}
 	cmd := fmt.Sprintf(c.zshCmd, c.binPath, c.name)
 	file := filepath.Join(c.homeDir, ".zshrc")
 	if c.isLineExists(file, cmd) {

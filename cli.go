@@ -88,7 +88,9 @@ const (
 	defaultHelpTemplate = `{{.Help}}
 {{with $flags := flagSet .Command}}{{if ne $flags ""}}
 Options:
-{{$flags}}{{- end }}{{end}}{{if gt (len .SubCommands) 0}}
+{{$flags}}{{- end }}{{end}}{{with $args := argList .Command}}{{if ne $args ""}}
+Arguments:
+{{$args}}{{- end }}{{end}}{{if gt (len .SubCommands) 0}}
 Commands:
 {{- range $name, $value := .SubCommands }}
     {{$value.NameAligned}}    {{$value.Synopsis}}{{with $flags := flagSet $value.Command}}{{if ne $flags ""}}
@@ -109,6 +111,7 @@ type CLI struct {
 	root             *Root
 	defaultCommand   string
 	flagSet          Flagger
+	arguments        arguments
 	flagSetOut       bytes.Buffer
 	template         string
 	lastCommandsName []string
@@ -197,12 +200,14 @@ func (cli *CLI) SetFlagSet(flagSet Flagger) {
 	cli.flagSet.SetOutput(&cli.flagSetOut)
 }
 
+// getSubCommand resolves the command of args. The arg fields of the parent
+// commands come before the ones of the sub command, all set after its name.
 func (cli *CLI) getSubCommand(command SubCommands, args []string) (Command, error) {
 	cli.lastCommandsName = []string{}
 	for name, c := range command.SubCommands() {
 		cli.lastCommandsName = append(cli.lastCommandsName, name)
 		if name == args[0] {
-			if err := cli.getFlagSet(c); err != nil {
+			if err := cli.defineCommand(cli.flagSet, c, &cli.arguments); err != nil {
 				return c, err
 			}
 			if subC, ok := c.(SubCommands); ok {
@@ -231,6 +236,9 @@ func (cli *CLI) getSubCommand(command SubCommands, args []string) (Command, erro
 			if err := cli.flagSet.Parse(parseArg); err != nil {
 				return c, err
 			}
+			if err := cli.arguments.set(cli.flagSet.Args()); err != nil {
+				return c, err
+			}
 			if p, ok := c.(ParseHelper); ok {
 				if err := p.Parse(cli.flagSet.Args()); err != nil {
 					return c, err
@@ -251,20 +259,12 @@ func (cli *CLI) help(c Command, err error) {
 	t, err := template.New("root").Funcs(template.FuncMap{
 		"replace": strings.Replace,
 		"flagSet": func(c Command) string {
-			fs := &flag.FlagSet{
-				Usage: func() {},
-			}
-			var out bytes.Buffer
-			fs.SetOutput(&out)
-			st := reflect.ValueOf(c)
-			if st.Kind() != reflect.Pointer {
-				return err.Error()
-			}
-			if err := cli.defineFlagSet(fs, st, ""); err != nil {
-				return err.Error()
-			}
-			fs.PrintDefaults()
-			return out.String()
+			flags, _ := cli.usage(c)
+			return flags
+		},
+		"argList": func(c Command) string {
+			_, args := cli.usage(c)
+			return args
 		},
 	}).Parse(defaultHelpTemplate)
 	if err != nil {
@@ -300,23 +300,39 @@ func (cli *CLI) help(c Command, err error) {
 	t.Execute(output, s)
 }
 
-func (cli *CLI) getFlagSet(c Command) error {
+// usage returns the flag and the positional argument help of c.
+func (cli *CLI) usage(c Command) (flags, args string) {
+	fs := &flag.FlagSet{
+		Usage: func() {},
+	}
+	var out bytes.Buffer
+	fs.SetOutput(&out)
+	var arguments arguments
+	if err := cli.defineCommand(fs, c, &arguments); err != nil {
+		return err.Error(), ""
+	}
+	fs.PrintDefaults()
+	return out.String(), arguments.String()
+}
+
+// defineCommand defines the flag fields of c on fs and appends its arg fields
+// to args.
+func (cli *CLI) defineCommand(fs Flagger, c Command, args *arguments) error {
 	st := reflect.ValueOf(c)
 	if st.Kind() != reflect.Pointer {
-		return errors.New("pointer expected")
+		return fmt.Errorf("%T: pointer expected", c)
 	}
-	if err := cli.defineFlagSet(cli.flagSet, st, ""); err != nil {
-		return err
+	if err := cli.defineFlagSet(fs, st, "", args); err != nil {
+		return fmt.Errorf("%T: %w", c, err)
 	}
 	return nil
 }
 
-func (cli *CLI) defineFlagSet(fs Flagger, st reflect.Value, subName string) error {
+func (cli *CLI) defineFlagSet(fs Flagger, st reflect.Value, subName string, args *arguments) error {
 	st = reflect.Indirect(st)
 	if !st.IsValid() || st.Type().Kind() != reflect.Struct {
 		return errors.New("non-nil pointer for struct expected")
 	}
-	flagValueType := reflect.TypeOf((*flag.Value)(nil)).Elem()
 	for i := 0; i < st.NumField(); i++ {
 		typ := st.Type().Field(i)
 		var name, usage string
@@ -326,15 +342,21 @@ func (cli *CLI) defineFlagSet(fs Flagger, st reflect.Value, subName string) erro
 			// field is unexported
 			continue
 		}
+		if argTag := typ.Tag.Get("arg"); argTag != "" {
+			if err := args.add(val, argTag, typ.Name); err != nil {
+				return err
+			}
+			continue
+		}
 		if tag == "" {
 			switch typ.Type.Kind() {
 			case reflect.Struct:
-				if err := cli.defineFlagSet(fs, val, ""); err != nil {
+				if err := cli.defineFlagSet(fs, val, "", args); err != nil {
 					return err
 				}
 			case reflect.Pointer:
 				if reflect.ValueOf(val).Kind() == reflect.Struct {
-					if err := cli.defineFlagSet(fs, val, ""); err != nil {
+					if err := cli.defineFlagSet(fs, val, "", args); err != nil {
 						return err
 					}
 				}
@@ -357,36 +379,51 @@ func (cli *CLI) defineFlagSet(fs Flagger, st reflect.Value, subName string) erro
 		if subName != "" {
 			name = subName + "." + name
 		}
-		addr := val.Addr()
-		if addr.Type().Implements(flagValueType) {
-			fs.Var(addr.Interface().(flag.Value), name, usage)
-			continue
-		} else if typ.Type.Kind() == reflect.Struct {
-			if err := cli.defineFlagSet(fs, st.Field(i), name); err != nil {
+		if typ.Type.Kind() == reflect.Struct && !val.Addr().Type().Implements(flagValueType) {
+			if err := cli.defineFlagSet(fs, val, name, args); err != nil {
 				return err
 			}
 			continue
 		}
-		switch d := val.Interface().(type) {
-		case int:
-			fs.IntVar(addr.Interface().(*int), name, d, usage)
-		case int64:
-			fs.Int64Var(addr.Interface().(*int64), name, d, usage)
-		case uint:
-			fs.UintVar(addr.Interface().(*uint), name, d, usage)
-		case uint64:
-			fs.Uint64Var(addr.Interface().(*uint64), name, d, usage)
-		case float64:
-			fs.Float64Var(addr.Interface().(*float64), name, d, usage)
-		case bool:
-			fs.BoolVar(addr.Interface().(*bool), name, d, usage)
-		case string:
-			fs.StringVar(addr.Interface().(*string), name, d, usage)
-		case time.Duration:
-			fs.DurationVar(addr.Interface().(*time.Duration), name, d, usage)
-		default:
-			return errors.New(fmt.Sprintf("field with flag tag value %q is unsupported type", name))
+		if err := bindValue(fs, val, name, usage); err != nil {
+			return fmt.Errorf("flag %q (field %s, type %s): %w", name, typ.Name, typ.Type, err)
 		}
+	}
+	return nil
+}
+
+var (
+	flagValueType      = reflect.TypeOf((*flag.Value)(nil)).Elem()
+	errUnsupportedType = errors.New("unsupported type")
+)
+
+// bindValue defines val on fs as the flag name. It is shared by the flag and
+// the arg fields.
+func bindValue(fs Flagger, val reflect.Value, name, usage string) error {
+	addr := val.Addr()
+	if v, ok := addr.Interface().(flag.Value); ok {
+		fs.Var(v, name, usage)
+		return nil
+	}
+	switch d := val.Interface().(type) {
+	case int:
+		fs.IntVar(addr.Interface().(*int), name, d, usage)
+	case int64:
+		fs.Int64Var(addr.Interface().(*int64), name, d, usage)
+	case uint:
+		fs.UintVar(addr.Interface().(*uint), name, d, usage)
+	case uint64:
+		fs.Uint64Var(addr.Interface().(*uint64), name, d, usage)
+	case float64:
+		fs.Float64Var(addr.Interface().(*float64), name, d, usage)
+	case bool:
+		fs.BoolVar(addr.Interface().(*bool), name, d, usage)
+	case string:
+		fs.StringVar(addr.Interface().(*string), name, d, usage)
+	case time.Duration:
+		fs.DurationVar(addr.Interface().(*time.Duration), name, d, usage)
+	default:
+		return errUnsupportedType
 	}
 	return nil
 }

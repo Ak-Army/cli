@@ -26,7 +26,8 @@ type SubCommands interface {
 }
 
 type ParseHelper interface {
-	// Parse should help to validate flags, and add extra options
+	// Parse should help to validate flags, and add extra options.
+	// It runs after the flag and `arg` fields are set, with the positional arguments.
 	Parse([]string) error
 }
 
