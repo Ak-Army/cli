@@ -115,6 +115,7 @@ type CLI struct {
 	flagSetOut       bytes.Buffer
 	template         string
 	lastCommandsName []string
+	middlewares      []Middleware
 }
 
 // New returns a new CLI struct
@@ -141,12 +142,36 @@ func (cli *CLI) SetDefault(command string) {
 	cli.defaultCommand = command
 }
 
-// Run parses the arguments and runs the applicable command
-func (cli *CLI) Run(ctx context.Context, args []string) {
+// Run parses the arguments, runs the applicable command and returns its
+// error. A *UsageError is printed with the help of its command before it is
+// returned; any other error is returned unprinted, for the caller to report.
+// A help request (-h) prints the help and returns nil.
+func (cli *CLI) Run(ctx context.Context, args []string) error {
+	c, err := cli.execute(ctx, args)
+	if errors.Is(err, flag.ErrHelp) {
+		cli.help(c, nil)
+		return nil
+	}
+	var ue *UsageError
+	if errors.As(err, &ue) {
+		cli.help(c, err)
+	}
+	return err
+}
+
+// Use adds a middleware around the Run of every command. The first one added
+// is the outermost.
+func (cli *CLI) Use(mw Middleware) {
+	cli.middlewares = append(cli.middlewares, mw)
+}
+
+// execute resolves and runs the command of args. It returns the command the
+// error belongs to; argument errors are wrapped in a *UsageError.
+func (cli *CLI) execute(ctx context.Context, args []string) (Command, error) {
 	doComplete := false
 	if line, ok := cli.isCompleteStarted(); ok {
 		if !cli.AutoComplete {
-			return
+			return nil, nil
 		}
 		args = strings.Split(line, " ")
 		doComplete = true
@@ -173,20 +198,27 @@ func (cli *CLI) Run(ctx context.Context, args []string) {
 				}
 			})
 		}
-		return
+		return nil, nil
 	}
 	if err != nil {
-		cli.help(c, err)
-		return
+		var ue *UsageError
+		if !errors.As(err, &ue) && !errors.Is(err, flag.ErrHelp) {
+			err = &UsageError{Err: err}
+		}
+		return c, err
 	}
 	if c == nil {
+		if args[1] != "" {
+			return cli.root, Usagef("unknown command %q", args[1])
+		}
 		cli.help(cli.root, nil)
-		return
-
+		return nil, nil
 	}
-	if err := c.Run(ctx); err != nil {
-		cli.help(c, err)
+	run := RunFunc(c.Run)
+	for i := len(cli.middlewares) - 1; i >= 0; i-- {
+		run = cli.middlewares[i](c, run)
 	}
+	return c, run(ctx)
 }
 
 // SetTemplate set a new template for commands

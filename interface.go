@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// A command is a runnable command of a CLI.
+// Command is a runnable command of a CLI.
 type Command interface {
 	// Help should return long-form help text that includes the command-line
 	// usage, a brief few sentences explaining the function of the command.
@@ -19,6 +19,13 @@ type Command interface {
 	// Run should run the actual command with the given Context
 	Run(ctx context.Context) error
 }
+
+// RunFunc runs a command, see Command.Run.
+type RunFunc func(ctx context.Context) error
+
+// Middleware wraps the run of command c: it may prepare the context, check
+// or clean up around next, or skip it. Added with CLI.Use.
+type Middleware func(c Command, next RunFunc) RunFunc
 
 type SubCommands interface {
 	// SubCommand should return a list of sub commands

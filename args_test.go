@@ -113,15 +113,18 @@ func TestArgsVariadicNotLast(t *testing.T) {
 }
 
 func TestArgsHelp(t *testing.T) {
-	_, stderr := run(t, &argCmd{}, "-h")
+	stdout, stderr := run(t, &argCmd{}, "-h")
+	if stderr != "" {
+		t.Errorf("stderr: %s", stderr)
+	}
 	for _, want := range []string{"Options:", "-v\t", "Arguments:", "  name\n    \twho",
 		"  ids...\n    \tobservation ids"} {
-		if !strings.Contains(stderr, want) {
-			t.Errorf("help misses %q:\n%s", want, stderr)
+		if !strings.Contains(stdout, want) {
+			t.Errorf("help misses %q:\n%s", want, stdout)
 		}
 	}
-	if strings.Contains(stderr, "-name") {
-		t.Errorf("arg field listed as flag:\n%s", stderr)
+	if strings.Contains(stdout, "-name") {
+		t.Errorf("arg field listed as flag:\n%s", stdout)
 	}
 }
 

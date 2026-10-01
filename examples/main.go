@@ -23,7 +23,9 @@ including versions of Lorem Ipsum.`
 
 	cli.RootCommand().AddCommand("completion", &command.Completion{})
 	c.SetDefault("dialer")
-	c.Run(context.Background(), os.Args)
+	if err := c.Run(context.Background(), os.Args); err != nil {
+		os.Exit(1)
+	}
 }
 
 /*

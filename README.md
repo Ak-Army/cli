@@ -72,5 +72,33 @@ func main() {
 
 ```
 
+## Errors and middleware
+`Run` returns the error of the command: a `*cli.UsageError`
+(bad flag, missing or invalid argument, unknown command, or one a command returns with `cli.Usagef`) is printed
+with the help first, any other error is left to the caller. `-h` prints the help and returns nil.
+```Go
+if err := c.Run(ctx, os.Args); err != nil {
+	var ue *cli.UsageError
+	if !errors.As(err, &ue) {
+		fmt.Fprintln(os.Stderr, "echoer:", err)
+	}
+	os.Exit(1)
+}
+```
+`Use` wraps the `Run` of every command, e.g. to open a resource once and pass it in the context. The first
+middleware added is the outermost; none runs for a usage error found while parsing.
+```Go
+c.Use(func(cmd cli.Command, next cli.RunFunc) cli.RunFunc {
+	return func(ctx context.Context) error {
+		db, err := openDB()
+		if err != nil {
+			return err
+		}
+		defer db.Close()
+		return next(context.WithValue(ctx, dbKey{}, db))
+	}
+})
+```
+
 # Useful packages:
 * <https://github.com/sgreben/flagvar>
